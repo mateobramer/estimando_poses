@@ -28,6 +28,10 @@ import time
 import math
 import csv
 
+from augmentation_geometrica import (
+    aplicar_augmentation_geometrica, kps_dict_desde_row, KP_NAMES as _KP_ORDER
+)
+
 KP_NAMES = [
     "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
     "left_wrist", "right_wrist", "left_hip", "right_hip",
@@ -35,14 +39,15 @@ KP_NAMES = [
     "head", "neck"
 ]
 N_KP = len(KP_NAMES)
+assert KP_NAMES == _KP_ORDER, "El orden de keypoints debe coincidir con augmentation_geometrica.py"
 
 
-# Dataset
 class PoseDataset(Dataset):
-    def __init__(self, df, frames_dir, transform):
+    def __init__(self, df, frames_dir, transform, augmentar_geometria=False):
         self.df = df.reset_index(drop=True)
         self.frames_dir = frames_dir
         self.transform = transform
+        self.augmentar_geometria = augmentar_geometria
         self.kp_cols = [f"{kp}_{c}" for kp in KP_NAMES for c in ["x", "y"]]
 
     def __len__(self):
@@ -52,15 +57,27 @@ class PoseDataset(Dataset):
         row = self.df.iloc[idx]
         path = os.path.join(self.frames_dir, row["imagen"])
         img = Image.open(path).convert("RGB")
-        img = self.transform(img)
 
-        kp = torch.tensor(row[self.kp_cols].values.astype(float), dtype=torch.float32)
+        kps_dict = kps_dict_desde_row(row, KP_NAMES)
+
+        if self.augmentar_geometria:
+            img, kps_dict = aplicar_augmentation_geometrica(img, kps_dict, out_size=224)
+        else:
+            img = img.resize((224, 224), Image.BILINEAR)
+            # sin augmentation geometrica: las coords no cambian (ya estan
+            # normalizadas respecto al crop, que ahora se resizea sin recortar)
+
+        img = self.transform(img)  # solo color/blur/grayscale + ToTensor + Normalize
+
+        kp = torch.tensor(
+            [kps_dict[kp][c] for kp in KP_NAMES for c in (0, 1)],
+            dtype=torch.float32
+        )
 
         mask_coords = torch.zeros(N_KP * 2)
         mask_kp     = torch.zeros(N_KP)
         for i, kp_name in enumerate(KP_NAMES):
-            x = float(row[f"{kp_name}_x"])
-            y = float(row[f"{kp_name}_y"])
+            x, y = kps_dict[kp_name]
             if 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0:
                 mask_coords[i*2]   = 1.0
                 mask_coords[i*2+1] = 1.0
@@ -117,18 +134,15 @@ def entrenar(args):
 
     os.makedirs("checkpoints", exist_ok=True)
 
+
     train_transform = transforms.Compose([
-        transforms.Resize((256, 256)),
-        transforms.RandomResizedCrop(224, scale=(0.7, 1.0)),
         transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.1),
-        transforms.RandomRotation(15),
         transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0)),
         transforms.RandomGrayscale(p=0.1),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     val_transform = transforms.Compose([
-        transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
@@ -138,8 +152,11 @@ def entrenar(args):
     df_val   = pd.read_csv(args.val_csv)
     print(f"  Train: {len(df_train)} | Val: {len(df_val)}")
 
-    train_ds = PoseDataset(df_train, args.frames, train_transform)
-    val_ds   = PoseDataset(df_val,   args.frames, val_transform)
+    frames_train_dir = args.frames if args.frames is not None else args.frames_train
+    frames_val_dir   = args.frames if args.frames is not None else args.frames_val
+
+    train_ds = PoseDataset(df_train, frames_train_dir, train_transform, augmentar_geometria=True)
+    val_ds   = PoseDataset(df_val,   frames_val_dir,   val_transform,   augmentar_geometria=False)
     train_dl = DataLoader(train_ds, batch_size=args.batch, shuffle=True,
                           num_workers=4, pin_memory=True)
     val_dl   = DataLoader(val_ds,   batch_size=args.batch, shuffle=False,
@@ -161,6 +178,7 @@ def entrenar(args):
 
     mejor_val_loss = float("inf")
     log_path = "checkpoints/log.csv"
+    epochs_sin_mejora = 0  # contador para early stopping
 
     with open(log_path, "w", newline="") as f:
         csv.writer(f).writerow(["epoch", "train_loss", "val_loss", "lr", "tiempo_s"])
@@ -211,8 +229,16 @@ def entrenar(args):
         # guardar mejor modelo
         if val_loss < mejor_val_loss:
             mejor_val_loss = val_loss
+            epochs_sin_mejora = 0
             torch.save(model.state_dict(), "checkpoints/mejor_modelo.pth")
             print(f"  Mejor modelo guardado ({mejor_val_loss:.4f})")
+        else:
+            epochs_sin_mejora += 1
+            print(f"  Sin mejora: {epochs_sin_mejora}/{args.patience}")
+            if epochs_sin_mejora >= args.patience:
+                print(f"\nEarly stopping en epoch {epoch} — sin mejora por {args.patience} epocas.")
+                print(f"Mejor val loss: {mejor_val_loss:.4f}")
+                break
 
         # guardar ultimo
         torch.save(model.state_dict(), "checkpoints/ultimo_modelo.pth")
@@ -222,6 +248,7 @@ def entrenar(args):
             print("  Descongelando backbone...")
             model.descongelar_backbone()
             optimizer = torch.optim.Adam(model.parameters(), lr=args.lr * 0.1, weight_decay=1e-4)
+            epochs_sin_mejora = 0  # resetear contador al descongelar
 
     print(f"\nEntrenamiento terminado. Mejor val loss: {mejor_val_loss:.4f}")
 
@@ -230,12 +257,19 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--train_csv", default="dataset_final/train.csv")
     parser.add_argument("--val_csv",   default="dataset_final/val.csv")
-    parser.add_argument("--frames",    default="dataset_final/frames")
+    parser.add_argument("--frames_train", default="dataset_final/frames_train",
+                         help="carpeta con los crops de train")
+    parser.add_argument("--frames_val",   default="dataset_final/frames_val",
+                         help="carpeta con los crops de val")
+    parser.add_argument("--frames",       default=None,
+                         help="(legacy) si se pasa, se usa para train Y val por igual")
     parser.add_argument("--backbone",  default="mobilenetv2_100")
     parser.add_argument("--epochs",    type=int,   default=100)
     parser.add_argument("--batch",     type=int,   default=64)
     parser.add_argument("--lr",        type=float, default=0.001)
     parser.add_argument("--continuar", action="store_true")
+    parser.add_argument("--patience",  type=int, default=10,
+                        help="epocas sin mejora antes de early stopping")
     args = parser.parse_args()
     entrenar(args)
 
