@@ -1,0 +1,16 @@
+Dispositivo: cpu
+Cargando dataset: train_14kp.csv
+  Train: 32094 | Val: 3565
+Epoch   1/6 | train: 0.00462 | val: 0.00151 | 23760.0s
+  Mejor modelo guardado (0.00151)
+Epoch   2/6 | train: 0.00152 | val: 0.00149 | 25700.5s
+  Mejor modelo guardado (0.00149)
+Epoch   3/6 | train: 0.00146 | val: 0.00146 | 31936.1s
+  Mejor modelo guardado (0.00146)
+  Descongelando backbone...
+Epoch   4/6 | train: 0.00146 | val: 0.00145 | 7067.2s
+  Mejor modelo guardado (0.00145)
+Epoch   5/6 | train: 0.00146 | val: 0.00146 | 9268.9s
+Epoch   6/6 | train: 0.00146 | val: 0.00146 | 6867.5s
+
+Entrenamiento terminado. Mejor val loss: 0.00145
