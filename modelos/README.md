@@ -1,3 +1,5 @@
 # Modelos
 
-Los checkpoints (.pth) están en Google Drive: https://drive.google.com/drive/folders/1iXg-g5S0MyEKB1Qqc6zfA-tczKhg14rB?usp=drive_link
+Los checkpoints (.pth) están en Google Drive: https://drive.google.com/drive/folders/1Y0IGIux13a9WEcjKwi5LvnQLDWd38x5y?usp=sharing
+
+(Solo acceso para miembros de la universidad)
