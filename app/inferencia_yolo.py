@@ -108,7 +108,17 @@ def determinar_fase(keypoints, ejercicio):
     a, b, c = keypoints[kps_idx[0]], keypoints[kps_idx[1]], keypoints[kps_idx[2]]
     ang     = calcular_angulo(a, b, c)
     umbral  = tracking.get("umbral_inicio", 120)
-    return "baja" if 0 < ang < umbral else "alta"
+    fases = list(art_config.get("fases", {}).keys())
+    if not fases:
+        return "baja"
+    if len(fases) == 1:
+        return fases[0]
+    umbral   = tracking.get("umbral_inicio", 120)
+    invertido = tracking.get("umbral_inicio", 120) > tracking.get("umbral_fin", 160)
+    if invertido:
+        return fases[0] if ang > umbral else fases[1]
+    else:
+        return fases[0] if 0 < ang < umbral else fases[1]
 
 # ---------------------------------------------------------------------------
 # Loop de video
@@ -206,7 +216,7 @@ def loop_video(args, modelo, yolo, device, ejercicio_inicial: str) -> str | None
         elif key == ord("m"):
             pedir_menu = True
             break
-        elif ord("1") <= key <= ord("5"):
+        elif ord("1") <= key <= ord("9"):
             idx = key - ord("1")
             if idx < len(EJERCICIO_KEYS):
                 nuevo = EJERCICIO_KEYS[idx]
@@ -225,7 +235,7 @@ def loop_video(args, modelo, yolo, device, ejercicio_inicial: str) -> str | None
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--modelo",     default="modelo_a_fix_mejor.pth")
+    parser.add_argument("--modelo",     default="modelos/modelo_a_fix_mejor.pth")
     parser.add_argument("--backbone",   default="mobilenetv2_100")
     parser.add_argument("--camara",     type=int,   default=0)
     parser.add_argument("--conf",       type=float, default=0.5)

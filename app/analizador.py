@@ -1,43 +1,3 @@
-"""
-analizador.py
-=============
-Recibe keypoints (14, 2) y el nombre de un ejercicio.
-Calcula los ángulos articulares, los evalúa contra la referencia
-y devuelve feedback estructurado.
-
-Interfaz pública
-----------------
-  analizador = Analizador("sentadilla")
-
-  # Por frame:
-  resultado = analizador.analizar(keypoints, fase="baja")
-
-  # resultado es un dict:
-  {
-    "ejercicio":   "sentadilla",
-    "fase":        "baja",
-    "angulos": {
-      "rodilla_izq": 72.3,
-      "rodilla_der": 74.1,
-      "cadera_izq":  98.5,
-      ...
-    },
-    "evaluaciones": {
-      "rodilla_izq": {"estado": "ok",   "mensaje": "✓ Buen ángulo"},
-      "rodilla_der": {"estado": "alto", "mensaje": "Rodilla derecha no llegó..."},
-      ...
-    },
-    "ok_global":   False,       # True si TODAS las articulaciones están en rango
-    "rep_completa": True,       # True en el frame donde se detectó el fin de una rep
-    "num_reps":     3,
-  }
-
-Separación de responsabilidades
---------------------------------
-  angulos_referencia.py  →  solo datos (qué es correcto)
-  detector_keypoints.py  →  solo percepción (keypoints del modelo)
-  analizador.py          →  solo razonamiento (ángulos + reglas + reps)
-"""
 
 from __future__ import annotations
 
@@ -46,7 +6,7 @@ from angulos_referencia import EJERCICIOS
 
 
 # ---------------------------------------------------------------------------
-# Función de cálculo de ángulo (matemática pura, sin dependencias externas)
+# Función de cálculo de ángulo 
 # ---------------------------------------------------------------------------
 
 def calcular_angulo(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
@@ -121,15 +81,26 @@ class _ContadorReps:
     def actualizar(self, angulo: float) -> bool:
         """Retorna True si en este frame se completó una rep."""
         if angulo < 0:
-            return False   # keypoint no detectado, no cambiar estado
+            return False   
+
+        # Soporte para ejercicios donde el ángulo empieza alto y baja
+        invertido = self._umbral_inicio > self._umbral_fin
 
         completada = False
-        if not self._en_fase_baja and angulo < self._umbral_inicio:
-            self._en_fase_baja = True
-        elif self._en_fase_baja and angulo > self._umbral_fin:
-            self._en_fase_baja = False
-            self.reps += 1
-            completada = True
+        if not invertido:
+            if not self._en_fase_baja and angulo < self._umbral_inicio:
+                self._en_fase_baja = True
+            elif self._en_fase_baja and angulo > self._umbral_fin:
+                self._en_fase_baja = False
+                self.reps += 1
+                completada = True
+        else:
+            if not self._en_fase_baja and angulo > self._umbral_inicio:
+                self._en_fase_baja = True
+            elif self._en_fase_baja and angulo < self._umbral_fin:
+                self._en_fase_baja = False
+                self.reps += 1
+                completada = True
 
         return completada
 
@@ -273,15 +244,20 @@ class Analizador:
         return evaluaciones
 
     def _actualizar_reps(self, angulos: dict[str, float]) -> bool:
-        """
-        Actualiza el contador de reps con el ángulo de la articulación de tracking.
-        """
         tracking = self._config.get("rep_tracking")
         if not tracking:
             return False
 
-        art_nombre = tracking["articulacion"]
-        angulo_ref = angulos.get(art_nombre, -1.0)
+        # Soporte para uno o varios articulaciones de tracking
+        if "articulaciones" in tracking:
+            valores = [angulos.get(a, -1.0) for a in tracking["articulaciones"]]
+            valores_validos = [v for v in valores if v >= 0]
+            if not valores_validos:
+                return False
+            angulo_ref = min(valores_validos)  # la que más se movió
+        else:
+            angulo_ref = angulos.get(tracking["articulacion"], -1.0)
+
         return self._contador.actualizar(angulo_ref)
 
     def _crear_contador(self) -> _ContadorReps:
