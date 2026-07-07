@@ -30,9 +30,7 @@ python app/inferencia_yolo.py
 
 Esto abre la cámara, detecta personas con YOLO, estima keypoints con el modelo propio y muestra el overlay con feedback en tiempo real. Antes de arrancar aparece un menú de selección de ejercicio (`menu.py`).
 
-**El modelo entrenado (`modelo_a_fix_mejor.pth`) debe estar en `modelos/`.** Si no está, descargarlo desde Google Drive:  
-https://drive.google.com/drive/folders/1iXg-g5S0MyEKB1Qqc6zfA-tczKhg14rB?usp=drive_link
-
+**El modelo entrenado (`modelo_a_fix_mejor.pth`) debe estar en `modelos/`.**
 ---
 
 ## Estructura del proyecto
@@ -43,9 +41,10 @@ estimando_poses/
 ├── entrenamiento/     # Scripts usados para entrenar en GCP
 ├── datos/             # Preparación del dataset CrowdPose
 ├── experimentos/      # Diagnósticos, comparaciones, cosas exploradas
-├── modelos/           # Checkpoints entrenados (ver README interno)
+├── modelos/           # Checkpoints entrenados
 ├── logs/              # Salidas de entrenamiento
-├── librealsense/      # SDK de Intel RealSense (integración pausada)
+├── realsense/         # Reconstrucción 3D con cámara RealSense D435i
+├── testing/           # Scripts de evaluación y comparación de modelos
 ├── dataset_final/     # Dataset CrowdPose procesado (no va a git)
 ├── yolov8n.pt         # Modelo YOLO preentrenado para detección de personas
 └── README.md          # Este archivo
@@ -131,6 +130,20 @@ https://drive.google.com/drive/folders/1iXg-g5S0MyEKB1Qqc6zfA-tczKhg14rB?usp=dri
 | `log.txt` | Log auxiliar. |
 
 ---
+## RealSense 3D
+
+Requiere Intel RealSense D435i conectada por USB 3.0 y el SDK instalado (`pip install pyrealsense2`).
+
+```bash
+# Nube de puntos con colores reales de la cámara
+python librealsense/avatar_3d_realsense.py --modelo modelos/modelo_a_fix_mejor.pth --paso 8
+
+# Avatar articulado con cilindros (Open3D)
+python librealsense/avatar_cilindros.py --modelo modelos/modelo_a_fix_mejor.pth
+```
+
+`--paso` controla la densidad de la nube de puntos: mayor = más rápido pero menos denso. Recomendado: 8-12.
+-------
 
 ## Flujo de desarrollo (cómo llegamos hasta acá)
 
